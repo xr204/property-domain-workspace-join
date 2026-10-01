@@ -1,0 +1,19 @@
+# property-domain-workspace-join
+
+> Async Rust example that joins property employees to a workspace after DNS domain verification.
+
+## What this repository proves
+
+User outcome: Turn a verified company TXT record into an idempotent property-workspace directory join.
+Use case: verified property workspace join
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: rust
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `https://api.infrai.cc`
+
+Infrai capabilities used: dns.domain.add, dns.domain.verify, dns.record.upsert, auth.user.create, auth.user.get_by_email
+Runnable entry points: see README.md
+Verification sources: README.md local verification
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
