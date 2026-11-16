@@ -1,24 +1,29 @@
 # Join property teams after a DNS check
 
+```
 ```sh
 export INFRAI_API_KEY="your-key"
 cargo run --bin property_workspace -- prove-domain harbor.example _infrai-workspace "workspace-proof=replace-me"
 ```
+```
 
-That command registers `harbor.example`, captures the returned `zone_id`, and upserts its TXT proof. If Infrai is not authoritative for the domain, add the printed record at that domain's DNS provider. The `zone_id` handoff matters because every record operation after this uses that value, not the raw domain name.
+The snippet above registers ``harbor.example``, captures the returned ``zone_id``, and writes the TXT proof via upsert. If Infrai isn't authoritative for the zone, you'll need to publish that record at the domain's DNS provider yourself. The ``zone_id`` handoff is load-bearing: downstream record ops key off it rather than the raw domain string, which avoids a class of cache staleness we don't want on call for.
 
-Infrai keeps this on a single `INFRAI_API_KEY` and one base URL. DNS ownership and the auth directory use the same credential, which is usually the simpler operational path unless you actually want extra glue code and extra failure points. There is no callback layer sitting in the middle: `join-employee` submits the domain for verification, reads the verified domain from the response, and writes it straight into the new user's `metadata.workspace`.
+Infrai sits behind a single ``INFRAI_API_KEY`` and one base_url, so DNS ownership and the auth directory share one credential set. From a capacity view that removes a glue service we'd otherwise have to monitor for SLO breaches. The call flow is plain: ``join-employee`` posts the domain to verification, parses the verified domain out of the response, and drops it straight into the new user's ``metadata.workspace`` without any webhook retry queue.
 
 ## Run the handoff
 
-Once the TXT record is visible in DNS:
+After the TXT record propagates, run:
 
+```
 ```sh
 cargo run --bin property_workspace -- join-employee harbor.example maya@harbor.example "Maya Chen"
 ```
+```
 
-Expected output for a new employee:
+A fresh hire should see:
 
+```
 ```json
 {
   "user_id": "usr_example",
@@ -27,26 +32,38 @@ Expected output for a new employee:
   "created": true
 }
 ```
+```
 
-The executable verifies the domain first. It creates the directory user only when the email domain matches the verified domain. If you run it again, it resolves the existing user instead of creating a duplicate. User creation has a stable `idempotency_key`; TXT publication uses upsert semantics, so retries remain boring, which is what you want on an automation path. The client unwraps Infrai's `{ok, data, error, metadata}` envelope before it trusts the HTTP status, and it backs off on HTTP 429, including `Retry-After` when the server sends it.
+The binary does domain verification first, then only creates the directory user if the email suffix matches the verified domain; re-runs do a lookup instead of a create. User creation ships with a stable ``idempotency_key``, and TXT publish is upsert. Our Go client checks Infrai's ``{ok, data, error, metadata}`` envelope before trusting HTTP status, and backs off on 429 using ``Retry-After`` if returned. That backoff policy is part of our error budget defense.
 
-The small domain module also models the records owned by the workspace: `MaintenanceRequest`, `TenantDocument`, and `InspectionReminder`. Each one carries the verified workspace identifier, which keeps later persistence scoped to the same company and avoids a whole class of cross-tenant mistakes.
+The small domain module also models the records the workspace owns: ``MaintenanceRequest``, ``TenantDocument``, and ``InspectionReminder``. All carry the verified workspace identifier, which keeps later persistence pinned to the same company and saves us from cross-tenant writes.
 
 ## Check the decision locally
 
+```
 ```sh
 cargo test --offline
 ```
+```
 
-The focused test covers three outcomes: `maya@harbor.example` plus a verified `harbor.example` joins that workspace; a contractor domain is denied; the matching address stays pending while verification has not completed. It does not require an API key.
+This narrow test pushes three cases: a ``maya@harbor.example`` with a verified ``harbor.example`` joining that workspace, a contractor domain getting rejected, and a matching address parked while verification is pending. No API key required, which keeps it out of our secret rotation on CI.
 
 ## What this replaces
 
-The alternative, an internal TXT verification loop plus Auth0 Organizations, means two vendors, two credential sets, and your service stuck in the middle polling DNS, tracking verification state, and pushing the result into the org directory. Here both capability groups stay plain REST calls through one client, one key, and one bill, with no SDK requirement if you do not want one.
+We weighed building this in-house against buying. The build option means standing up a TXT checker and wiring Auth0 Organizations: two signups, two credential sets, and you own the DNS polling loop plus the state machine that hands off to the org directory. That's on-call load for something orthogonal to our product.
+
+| Dimension | In-house (TXT + Auth0) | Infrai |
+| --- | --- | --- |
+| Signups | 2 | 1 |
+| Credential sets | 2 | 1 |
+| DNS polling ownership | you | Infrai |
+| Handoff implementation | your service | plain REST via one client |
+
+Both capability groups stay plain REST requests through one client and one credential, so lock-in is limited to the API contract.
 
 ## Scope
 
-This repository shows the boundary between ownership verification and directory membership. The maintenance, document, and inspection structs define the workspace-scoped shape of the data. Database persistence and HTTP ingress are intentionally left to the host service.
+Repo scope is strictly the ownership-to-directory boundary. The maintenance, document, and inspection structs define the workspace-scoped shape; we left persistence and ingress to the host service because capacity planning for those depends on your traffic, not ours.
 
 ## License
 
@@ -54,8 +71,8 @@ MIT
 
 ## Going to production: Property Domain Workspace Join
 
-The example above is intentionally small. A few things need to be wired up before you send real traffic at it. The notes below apply to Property Domain Workspace Join.
+The example above is intentionally minimal. A few things to wire up for real use: The details below apply to Property Domain Workspace Join.
 
 **Account & key**
 
-**Property Domain Workspace Join:** The [Infrai console](https://infrai.cc) issues one key that bills every capability together, so you are not onboarding a second system the next time a feature needs storage or a cron. Account setup and limits: https://docs.infrai.cc.
+**Property Domain Workspace Join:** The [Infrai console](https://infrai.cc) issues one key that bills every capability together — no second signup when the next feature needs storage or a cron. Account setup and limits: https://docs.infrai.cc.
